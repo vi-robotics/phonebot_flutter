@@ -45,12 +45,26 @@ class FindDevicesScreen extends StatelessWidget {
               StreamBuilder<List<ScanResult>>(
                 stream: FlutterBlue.instance.scanResults,
                 initialData: [],
-                builder: (c, snapshot) => Column(
-                  children: snapshot.data
+                builder: (c, snapshot) {
+                  final rowData = snapshot.data
                       .where((d) => d.device.name.length > 0)
                       .map((r) => DeviceRow(result: r))
-                      .toList(),
-                ),
+                      .toList();
+                  final rowList = ListView.separated(
+                      scrollDirection: Axis.vertical,
+                      shrinkWrap: true,
+                      itemBuilder: (BuildContext context, int index) {
+                        return Container(child: rowData[index]);
+                      },
+                      separatorBuilder: (BuildContext context, int index) =>
+                          Divider(
+                            height: 0,
+                          ),
+                      itemCount: rowData.length);
+
+                  return rowList;
+                  // return Column(children: rowData);
+                },
               )
             ],
           ),
@@ -79,20 +93,33 @@ class FindDevicesScreen extends StatelessWidget {
 }
 
 class DeviceRow extends StatelessWidget {
-  const DeviceRow({Key key, this.result, this.fontSize = 24}) : super(key: key);
+  const DeviceRow({Key key, this.result, this.fontSize = 24, this.padding = 8})
+      : super(key: key);
 
+  final double padding;
   final double fontSize;
   final ScanResult result;
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: <Widget>[
-      Row(children: <Widget>[
-        Text(result.device.name,
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: fontSize)),
-      ]),
-      Row(children: [Text(result.device.id.toString())]),
-      Divider()
-    ]);
+    return InkWell(
+        onTap: () {
+          final snackBar = SnackBar(content: Text("Connecting"));
+          ScaffoldMessenger.of(context).showSnackBar(snackBar);
+        },
+        child: Column(
+          children: <Widget>[
+            Padding(
+                padding: EdgeInsets.all(padding),
+                child: Column(children: [
+                  Row(children: <Widget>[
+                    Text(result.device.name,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: fontSize)),
+                  ]),
+                  Row(children: [Text(result.device.id.toString())]),
+                ])),
+          ],
+        ));
   }
 }
