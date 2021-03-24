@@ -1,6 +1,12 @@
+import 'dart:math';
+import 'dart:async';
+
+import 'package:flutter/services.dart' show rootBundle;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:control_pad/control_pad.dart';
 import 'package:flutter_blue/flutter_blue.dart';
+import 'package:flutter_easyloading/flutter_easyloading.dart';
 
 void main() {
   runApp(PhonebotApp());
@@ -12,45 +18,68 @@ class PhonebotApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: ThemeData(primaryColor: Colors.blueGrey),
-      home: FindDevicesScreen(),
+      home: HomeScreen(),
+      builder: EasyLoading.init(),
     );
   }
 }
 
-// class DummyScreen extends StatelessWidget {
-//   @override
-//   Widget build(BuildContext context) {
-//     FlutterBlue flutterBlue = FlutterBlue.instance;
-//     flutterBlue.startScan(timeout: Duration(seconds: 4));
+class HomeScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('PhoneBot'),
+      ),
+      body: Column(
+        children: [
+          ElevatedButton(
+              onPressed: () => {
+                    Navigator.of(context).push(MaterialPageRoute(
+                        builder: (context) => FindDevicesScreen()))
+                  },
+              child: Text('Connect to PhoneBot')),
+          ElevatedButton(
+            onPressed: () async {
+              if (await PhoneBotController().isConnected()) {
+                Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (context) {
+                  PhoneBotRemoteController().start();
+                  return RemoteControlScreen();
+                }));
+              }
+            },
+            child: Text('Remote Control PhoneBot'),
+          ),
+          ElevatedButton(
+              onPressed: () {
+                PhoneBotController().disconnect();
+                final snackBar = SnackBar(content: Text('Disconnected'));
+                ScaffoldMessenger.of(context).showSnackBar(snackBar);
+              },
+              child: Text('Disconnect from PhoneBot'))
+        ],
+      ),
+    );
+  }
+}
 
-//     // Listen to scan results
-//     var subscription = flutterBlue.scanResults.listen((results) async {
-//       // do something with scan results
-//       for (ScanResult r in results) {
-//         if (r.device.name.contains("PhoneBot")) {
-//           print('${r.device.name} found! rssi: ${r.rssi}');
-//           // Connect to device, send some info, and disconnect
-//           PhoneBotController pc = PhoneBotController(device: r.device);
-//           flutterBlue.stopScan();
-
-//         }
-//       }
-//     }).onDone(() { });
-
-//     subscription.cancel();
-
-//     await pc.connect();
-//     print("Connected");
-//     await pc.openStream();
-//     print("Stream Open");
-//     await pc.setLegs();
-//     print("Legs set I guess?");
-//     await pc.disconnect();
-//     return;
-//     // final btmang = PhoneBotController();
-//     return Container();
-//   }
-// }
+class RemoteControlScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Remote Control'),
+      ),
+      body: Container(
+        child: JoystickView(
+          onDirectionChanged: (degrees, distance) =>
+              PhoneBotRemoteController().changeDirection(degrees, distance),
+        ),
+      ),
+    );
+  }
+}
 
 class FindDevicesScreen extends StatelessWidget {
   @override
@@ -63,44 +92,31 @@ class FindDevicesScreen extends StatelessWidget {
         onRefresh: () =>
             FlutterBlue.instance.startScan(timeout: Duration(seconds: 4)),
         child: SingleChildScrollView(
-          child: Column(
-            children: <Widget>[
-              // List of connected devices
-              StreamBuilder<List<BluetoothDevice>>(
-                stream: Stream.periodic(Duration(seconds: 2))
-                    .asyncMap((_) => FlutterBlue.instance.connectedDevices),
-                initialData: [],
-                builder: (c, snapshot) => Column(
-                  children: snapshot.data.map((d) => Text(d.name)).toList(),
-                ),
-              ),
-              // List of not yet connected devices. Only list devices
-              // which have a non-empty name.
-              StreamBuilder<List<ScanResult>>(
-                stream: FlutterBlue.instance.scanResults,
-                initialData: [],
-                builder: (c, snapshot) {
-                  final rowData = snapshot.data
-                      .where((d) => d.device.name.length > 0)
-                      .map((r) => DeviceRow(result: r))
-                      .toList();
-                  final rowList = ListView.separated(
-                      scrollDirection: Axis.vertical,
-                      shrinkWrap: true,
-                      itemBuilder: (BuildContext context, int index) {
-                        return Container(child: rowData[index]);
-                      },
-                      separatorBuilder: (BuildContext context, int index) =>
-                          Divider(
-                            height: 0,
-                          ),
-                      itemCount: rowData.length);
+          // List of not yet connected devices. Only list devices
+          // which have a non-empty name.
+          child: StreamBuilder<List<ScanResult>>(
+            stream: FlutterBlue.instance.scanResults,
+            initialData: [],
+            builder: (c, snapshot) {
+              final rowData = snapshot.data
+                  .where((d) => d.device.name.length > 0)
+                  .map((r) => DeviceRow(result: r))
+                  .toList();
+              final rowList = ListView.separated(
+                  scrollDirection: Axis.vertical,
+                  shrinkWrap: true,
+                  itemBuilder: (BuildContext context, int index) {
+                    return Container(child: rowData[index]);
+                  },
+                  separatorBuilder: (BuildContext context, int index) =>
+                      Divider(
+                        height: 0,
+                      ),
+                  itemCount: rowData.length);
 
-                  return rowList;
-                  // return Column(children: rowData);
-                },
-              )
-            ],
+              return rowList;
+              // return Column(children: rowData);
+            },
           ),
         ),
       ),
@@ -160,24 +176,20 @@ class DeviceRow extends StatelessWidget {
     return InkWell(
         onTap: () async {
           if (result.advertisementData.connectable) {
-            await result.device.connect();
-            print("Connected...");
-            await result.device.discoverServices();
+            EasyLoading.show(status: 'Connecting...');
 
-            PhoneBotController pc = PhoneBotController(device: result.device);
+            // Get an instance of the singleton
+            PhoneBotController pc = PhoneBotController();
 
-            await pc.connect();
-            print("Connected");
+            await pc.connect(result.device);
             await pc.openStream();
-            print("Stream Open");
             await pc.setLegs();
-            await pc.setLegs(frontLeftA: 60);
-            await pc.setLegs(frontLeftA: 120);
-            print("Legs set I guess?");
-            await pc.disconnect();
 
-            Navigator.of(context).push(MaterialPageRoute(
-                builder: (context) => PhoneBotScreen(device: result.device)));
+            EasyLoading.showSuccess('Connected!');
+            EasyLoading.dismiss();
+
+            // Go back to the home screen
+            Navigator.of(context).pop();
           } else {
             final snackBar =
                 SnackBar(content: Text("Device isn't connectable."));
@@ -205,6 +217,91 @@ class DeviceRow extends StatelessWidget {
   }
 }
 
+// Timer timer;
+
+// @override
+// void initState() {
+//   super.initState();
+//   timer = Timer.periodic(Duration(seconds: 15), (Timer t) => checkForNewSharedLists());
+// }
+class PhoneBotRemoteController {
+  // Make PhoneBotController a Singleton
+  static final PhoneBotRemoteController _phoneBotRemoteController =
+      PhoneBotRemoteController._internal();
+
+  factory PhoneBotRemoteController() {
+    return _phoneBotRemoteController;
+  }
+
+  PhoneBotRemoteController._internal();
+
+  Timer timer;
+  double xAmount = 0;
+  double yAmount = 0;
+  dynamic rotCsvRaw;
+  List<String> csvLines;
+  List<List<double>> turnLegData;
+
+  Future<String> loadAsset(String path) async {
+    return await rootBundle.loadString(path);
+  }
+
+  void start() {
+    if (timer != null) {
+      timer.cancel();
+    }
+    loadAsset('lib/assets/rot_traj_2.csv').then((dynamic output) {
+      rotCsvRaw = output;
+
+      csvLines = rotCsvRaw.toString().split(RegExp(r"([\r\n\$])+"));
+      // print(csvLines);
+      int numCols = csvLines[0].split(',').length;
+      turnLegData =
+          List.generate(csvLines.length, (_) => List.filled(numCols, 0));
+      // turnLegData = List.filled(csvLines.length, List.filled(numCols, 0));
+      for (int i = 0; i < csvLines.length; i++) {
+        List<String> row = csvLines[i].split(',');
+        print(row.length);
+        for (int j = 0; j < numCols; j++) {
+          try {
+            turnLegData[i][j] = double.parse(row[j + 1]);
+          } catch (e) {
+            if (e == FormatException) {
+              print("Poorly formated CSV row: ${row[j]}");
+            }
+            if (e == RangeError) {
+              print("Row not long enough: ${row[j]}");
+            }
+          }
+        }
+      }
+    });
+
+    timer = Timer.periodic(
+        Duration(milliseconds: 20), (Timer t) async => await update(t));
+  }
+
+  void update(Timer t) async {
+    try {
+      List<int> newLegData = List.filled(8, 90);
+      int idx = t.tick % turnLegData.length;
+      for (int i = 0; i < turnLegData[0].length - 1; i++) {
+        newLegData[i] = (turnLegData[idx][i + 1] * 50 + 90).toInt();
+      }
+
+      await PhoneBotController().setLegsFromValues(newLegData);
+    } catch (e) {
+      // Do nothing?
+      print("error...");
+    }
+  }
+
+  void changeDirection(double degrees, double distance) {
+    xAmount = distance * sin(degrees / 180 * pi);
+    yAmount = distance * cos(degrees / 180 * pi);
+  }
+}
+
 class PhoneBotCommand {
   static const int SET_LEG_POSITIONS = 0;
   static const int REQUEST_BATTERY_VOLTAGE = 1;
@@ -212,9 +309,18 @@ class PhoneBotCommand {
 }
 
 class PhoneBotController {
-  PhoneBotController({Key key, this.device});
+  // Make PhoneBotController a Singleton
+  static final PhoneBotController _phoneBotController =
+      PhoneBotController._internal();
 
-  final BluetoothDevice device;
+  factory PhoneBotController() {
+    return _phoneBotController;
+  }
+
+  PhoneBotController._internal();
+
+  // Internal variables
+  BluetoothDevice device;
   BluetoothCharacteristic rxChar;
 
   static Guid transparentUartServiceUuid =
@@ -232,6 +338,7 @@ class PhoneBotController {
   List<int> legState = List<int>.filled(8, 90,
       growable: false); // The angles of the legs in degrees
 
+  // Methods
   BluetoothService getService(
       Guid serviceUUID, List<BluetoothService> services) {
     for (BluetoothService service in services) {
@@ -277,22 +384,17 @@ class PhoneBotController {
         getCharacteristic(uartService, transparentUartTxCharUuid);
     if (await isConnected()) {
       await txChar.setNotifyValue(true);
-      print("Notify set!!!");
     } else {
-      print("Awww disconnected???");
+      // Do something?
     }
   }
 
-  Future<void> connect() async {
+  Future<void> connect(BluetoothDevice bluetoothDevice) async {
+    device = bluetoothDevice;
     if (!(await isConnected())) {
       await device.connect();
     }
-
     services = await device.discoverServices();
-
-    if (await isConnected()) {
-      print("Actually connected!!!");
-    }
   }
 
   Future<void> disconnect() async {
@@ -337,6 +439,18 @@ class PhoneBotController {
 
     List<int> res = resConstruct.expand((x) => x).toList();
     return res;
+  }
+
+  Future<void> setLegsFromValues(List<int> legValues) async {
+    await setLegs(
+        frontLeftA: legValues[0],
+        frontLeftB: legValues[1],
+        backLeftA: legValues[2],
+        backLeftB: legValues[3],
+        frontRightA: legValues[4],
+        frontRightB: legValues[5],
+        backRightA: legValues[6],
+        backRightB: legValues[7]);
   }
 
   Future<void> setLegs(
