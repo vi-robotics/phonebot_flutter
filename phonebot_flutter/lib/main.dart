@@ -309,7 +309,7 @@ class PhoneBotRemoteController {
       }
 
       for (int i = 0; i < turnLegData[0].length - 1; i++) {
-        newLegData[i] = (turnLegData[idx][i + 1] * 30 + 90).toInt();
+        newLegData[i] = (turnLegData[idx][i + 1] * 180 / pi + 90).toInt();
       }
 
       await PhoneBotController().setLegsFromValues(newLegData);
