@@ -217,13 +217,6 @@ class DeviceRow extends StatelessWidget {
   }
 }
 
-// Timer timer;
-
-// @override
-// void initState() {
-//   super.initState();
-//   timer = Timer.periodic(Duration(seconds: 15), (Timer t) => checkForNewSharedLists());
-// }
 class PhoneBotRemoteController {
   // Make PhoneBotController a Singleton
   static final PhoneBotRemoteController _phoneBotRemoteController =
@@ -236,11 +229,14 @@ class PhoneBotRemoteController {
   PhoneBotRemoteController._internal();
 
   Timer timer;
+  double lastUpdate = (new DateTime.now()).millisecondsSinceEpoch / 1000;
   double xAmount = 0;
   double yAmount = 0;
+  double yPathTime = 0;
   dynamic rotCsvRaw;
   List<String> csvLines;
   List<List<double>> turnLegData;
+  List<double> legTimes;
 
   Future<String> loadAsset(String path) async {
     return await rootBundle.loadString(path);
@@ -250,18 +246,19 @@ class PhoneBotRemoteController {
     if (timer != null) {
       timer.cancel();
     }
-    loadAsset('lib/assets/rot_traj_2.csv').then((dynamic output) {
+    loadAsset('lib/assets/rotating_trajectory.csv').then((dynamic output) {
       rotCsvRaw = output;
 
       csvLines = rotCsvRaw.toString().split(RegExp(r"([\r\n\$])+"));
-      // print(csvLines);
+
       int numCols = csvLines[0].split(',').length;
       turnLegData =
           List.generate(csvLines.length, (_) => List.filled(numCols, 0));
+      legTimes = List.filled(csvLines.length, 0);
       // turnLegData = List.filled(csvLines.length, List.filled(numCols, 0));
       for (int i = 0; i < csvLines.length; i++) {
         List<String> row = csvLines[i].split(',');
-        print(row.length);
+        legTimes[i] = double.parse(row[0]);
         for (int j = 0; j < numCols; j++) {
           try {
             turnLegData[i][j] = double.parse(row[j + 1]);
@@ -275,18 +272,44 @@ class PhoneBotRemoteController {
           }
         }
       }
+      // print(turnLegData[turnLegData.length - 1]);
     });
 
     timer = Timer.periodic(
-        Duration(milliseconds: 20), (Timer t) async => await update(t));
+        Duration(milliseconds: 50), (Timer t) async => await update(t));
   }
 
   void update(Timer t) async {
     try {
       List<int> newLegData = List.filled(8, 90);
-      int idx = t.tick % turnLegData.length;
+
+      // Find the time delta since last update
+      double timeSinceLastUpdate =
+          (new DateTime.now()).millisecondsSinceEpoch / 1000 - lastUpdate;
+      // Add the time delta times the current speed (a float between 0 and 1)
+      yPathTime += timeSinceLastUpdate *
+          yAmount; // Simulated seconds/second is scaled by yAmount
+      // print(turnLegData[turnLegData.length - 2][0]);
+      // Make sure we don't go beyond the edges of the array
+      if (yPathTime > legTimes[turnLegData.length - 1]) {
+        yPathTime = 0;
+      }
+      if (yPathTime < 0) {
+        yPathTime = legTimes[turnLegData.length - 1];
+      }
+      lastUpdate = (new DateTime.now()).millisecondsSinceEpoch / 1000;
+      int idx = 0;
+      // Do this more efficiently than looping through the whole CSV every
+      // update event
+      for (int i = 0; i < turnLegData.length; i++) {
+        if (legTimes[i] > yPathTime) {
+          idx = i;
+          break;
+        }
+      }
+
       for (int i = 0; i < turnLegData[0].length - 1; i++) {
-        newLegData[i] = (turnLegData[idx][i + 1] * 50 + 90).toInt();
+        newLegData[i] = (turnLegData[idx][i + 1] * 30 + 90).toInt();
       }
 
       await PhoneBotController().setLegsFromValues(newLegData);
@@ -477,6 +500,10 @@ class PhoneBotController {
     for (int i = 0; i < newLegState.length; i++) {
       if (newLegState[i] == null) {
         newLegState[i] = legState[i];
+      }
+
+      if (i % 2 == 1) {
+        newLegState[i] = 180 - newLegState[i];
       }
     }
 
